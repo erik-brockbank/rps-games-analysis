@@ -1,6 +1,6 @@
 
 # Analysis of dyad RPS data from Brockbank & Vul (2020)
-# Used for submission to Games journal speciall issue on psychology of games
+# Used for submission to Games journal special issue on psychology of games
 # Aug. 2021
 
 rm(list = ls())
@@ -9,7 +9,6 @@ setwd("/Users/erikbrockbank/web/vullab/rps-games-submission/")
 
 library(tidyverse)
 library(viridis)
-library(patchwork)
 
 
 
@@ -422,9 +421,7 @@ get_player_transition_prev_transition_prev_outcome_cond_probs = function(data) {
 }
 
 
-
-
-# FUNCTIONS: plots
+# FUNCTIONS: plots ====
 
 individ_plot_theme = theme(
   # titles
@@ -457,10 +454,6 @@ individ_plot_theme = theme(
 # INITIALIZATION: read data ====
 data = read_data(DATA_FILE, FILE_PATH)
 # unique(data$game_id) # sanity check
-
-
-
-
 
 
 
@@ -725,7 +718,7 @@ information_gain_summary = information_gain_combined %>%
 
 
 
-# ANALYSIS: information gain plots ====
+# FIGURE: information gain ====
 
 legend_width = 10
 graph_labels_final = c("entropy_move_dist" = str_wrap("Choice base rate (R/P/S)", legend_width),
@@ -771,5 +764,6 @@ ggplot(data = information_gain_summary,
   ggsave(filename = "information_gain_corr.png",
        path = "img",
        width = 10, height = 6.5)
+
 
 
