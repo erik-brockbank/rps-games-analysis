@@ -12,12 +12,16 @@ library(viridis)
 library(patchwork)
 
 
+
 # GLOBALS ====
 
 FILE_PATH = "data"
 DATA_FILE = "rps_v1_data.csv"
 
 MOVE_SET = c("rock", "paper", "scissors")
+TRANSITION_SET = c("+", "-", "0")
+OUTCOME_SET = c("win", "loss", "tie")
+
 
 
 # FUNCTIONS: analysis ====
@@ -95,6 +99,95 @@ get_player_2move_dist = function(data) {
     count(prev.2moves) %>%
     mutate(total.moves = sum(n),
            p.2prev.moves = n / total.moves)
+}
+
+
+# Function to get marginal probability of each transition
+# (+/-/0) for each participant
+get_player_transition_dist = function(data) {
+  data %>%
+    group_by(player_id) %>%
+    mutate(prev.move = lag(player_move, 1)) %>%
+    filter(!is.na(prev.move), # lag call above sets NA for lag on first move: ignore it here
+           prev.move != "none", player_move != "none") %>%
+    # NB: this can be slow to execute
+    mutate(player.transition = case_when(prev.move == player_move ~ "0",
+                                         ((prev.move == "rock" & player_move == "paper") |
+                                            (prev.move == "paper" & player_move == "scissors") |
+                                            (prev.move == "scissors" & player_move == "rock")) ~ "+",
+                                         ((prev.move == "rock" & player_move == "scissors") |
+                                            (prev.move == "paper" & player_move == "rock") |
+                                            (prev.move == "scissors" & player_move == "paper")) ~ "-")) %>%
+    count(player.transition) %>%
+    mutate(total.transitions = sum(n),
+           p.transition = n / total.transitions)
+}
+
+# Function to get marginal probability of each Cournot transition (+/-/0), i.e.,
+# relative to opponent's previous move for each player
+get_player_transition_cournot_dist = function(data) {
+  data %>%
+    group_by(player_id) %>%
+    mutate(prev.move = lag(player_move, 1)) %>%
+    filter(!is.na(prev.move)) %>% # lag call above sets NA for lag on first move: ignore it here
+    group_by(game_id, round_index) %>%
+    # opponent's previous move is previous row's prev.move for one of the players, next row's prev.move for the other
+    mutate(opponent.prev.move = ifelse(is.na(lag(player_move, 1)), lead(prev.move, 1), lag(prev.move, 1))) %>% # opponent's one move back (previous move)
+    filter(opponent.prev.move != "none" & player_move != "none") %>% # ignore "none" moves for this aggregation
+    group_by(player_id) %>%
+    # NB: this can be slow to execute
+    mutate(player.transition.cournot = case_when(opponent.prev.move == player_move ~ "0",
+                                                 ((opponent.prev.move == "rock" & player_move == "paper") |
+                                                    (opponent.prev.move == "paper" & player_move == "scissors") |
+                                                    (opponent.prev.move == "scissors" & player_move == "rock")) ~ "+",
+                                                 ((opponent.prev.move == "rock" & player_move == "scissors") |
+                                                    (opponent.prev.move == "paper" & player_move == "rock") |
+                                                    (opponent.prev.move == "scissors" & player_move == "paper")) ~ "-")) %>%
+    count(player.transition.cournot) %>%
+    mutate(total.transitions = sum(n),
+           p.transition = n / total.transitions)
+
+
+}
+
+
+# Function to get marginal probability of each outcome (win, loss, tie)
+# for each participant
+get_player_prev_outcome_dist = function(data) {
+  data %>%
+    group_by(player_id) %>%
+    mutate(prev.outcome = lag(player_outcome, 1)) %>%
+    filter(!is.na(prev.outcome)) %>% # lag call above sets NA for lag on first outcome: ignore it here
+    count(prev.outcome) %>%
+    mutate(total.outcomes = sum(n),
+           p.outcome = n / total.outcomes)
+}
+
+# Function to get the distribution over each player's previous
+# transition, previous outcome combination, e.g. "+_win" where the previous
+# transition "+" lead to a "win" in the previous outcome
+get_player_prev_transition_prev_outcome_dist = function(data) {
+  sep = "_"
+  data %>%
+    group_by(player_id) %>%
+    mutate(prev.outcome = lag(player_outcome, 1),
+           prev.move = lag(player_move, 1),
+           prev.move2 = lag(player_move, 2)) %>%
+    filter(!is.na(prev.outcome), # lag call above sets NA for lag on first outcome: ignore it here
+           !is.na(prev.move), !is.na(prev.move2), # lag call above sets NA for lag on first two moves: ignore it here
+           prev.move2 != "none", prev.move != "none", player_move != "none") %>%
+    # TODO move to a model where we add all these cols once at the beginning then just summarize in each analysis
+    mutate(player.prev.transition = case_when(prev.move2 == prev.move ~ "0",
+                                              ((prev.move2 == "rock" & prev.move == "paper") |
+                                                 (prev.move2 == "paper" & prev.move == "scissors") |
+                                                 (prev.move2 == "scissors" & prev.move == "rock")) ~ "+",
+                                              ((prev.move2 == "rock" & prev.move == "scissors") |
+                                                 (prev.move2 == "paper" & prev.move == "rock") |
+                                                 (prev.move2 == "scissors" & prev.move == "paper")) ~ "-"),
+           player.prev.transition.prev.outcome = paste(player.prev.transition, prev.outcome, sep = sep)) %>%
+    count(player.prev.transition.prev.outcome) %>%
+    mutate(total.transition.outcomes = sum(n),
+           p.transition.outcome = n / total.transition.outcomes)
 }
 
 
@@ -191,6 +284,143 @@ get_player_prev_2move_cond_probs = function(data) {
            n.agg, row.totals.agg, pmove_2prev.move) %>%
     arrange(player_id, player_move, prev.move, prev.move2)
 }
+
+
+# Function to get conditional distribution of each player's transition (+/-/0),
+# given their previous outcome (win, tie, loss)
+get_player_transition_outcome_cond_probs = function(data) {
+  sep = "_"
+  data %>%
+    group_by(player_id) %>%
+    mutate(prev.move = lag(player_move, 1),
+           prev.outcome = lag(player_outcome, 1)) %>%
+    filter(!is.na(prev.outcome), # lag call above sets NA for lag on first oucome: ignore it here
+           !is.na(prev.move), # lag call above sets NA for lag on first move: ignore it here
+           prev.move != "none", player_move != "none") %>%
+    # NB: this can be slow to execute
+    mutate(player.transition = case_when(prev.move == player_move ~ "0",
+                                         ((prev.move == "rock" & player_move == "paper") |
+                                            (prev.move == "paper" & player_move == "scissors") |
+                                            (prev.move == "scissors" & player_move == "rock")) ~ "+",
+                                         ((prev.move == "rock" & player_move == "scissors") |
+                                            (prev.move == "paper" & player_move == "rock") |
+                                            (prev.move == "scissors" & player_move == "paper")) ~ "-"),
+           player.outcome.transition = paste(prev.outcome, player.transition, sep = sep)) %>%
+    count(player.outcome.transition) %>%
+    group_by(player_id, player.outcome.transition) %>%
+    mutate(prev.outcome = strsplit(player.outcome.transition, sep)[[1]][1], # add prev.outcome back in because we lose it in the count() call above
+           player.transition = strsplit(player.outcome.transition, sep)[[1]][2]) %>% # add player.transition back in because we lose it in the count() call above
+    group_by(player_id, prev.outcome) %>%
+    mutate(row.totals = sum(n),
+           # probability of this player transition, conditioned on previous outcome
+           p.transition.outcome = n / row.totals)
+}
+
+
+# Function to get conditional distribution of each player's *Cournot* transition (+/-/0),
+# given their previous outcome (win, tie, loss)
+get_player_cournot_transition_outcome_cond_probs = function(data) {
+  sep = "_"
+  data %>%
+    group_by(player_id) %>%
+    mutate(prev.move = lag(player_move, 1),
+           prev.outcome = lag(player_outcome, 1)) %>%
+    filter(!is.na(prev.outcome), # lag call above sets NA for lag on first oucome: ignore it here
+           !is.na(prev.move), # lag call above sets NA for lag on first move: ignore it here
+           prev.move != "none", player_move != "none") %>%
+    # this code copied from `get.player.transition.cournot.dist` above
+    group_by(game_id, round_index) %>%
+    # opponent's previous move is previous row's prev.move for one of the players, next row's prev.move for the other
+    mutate(opponent.prev.move = ifelse(is.na(lag(player_move, 1)), lead(prev.move, 1), lag(prev.move, 1))) %>% # opponent's one move back (previous move)
+    filter(opponent.prev.move != "none" & player_move != "none") %>% # ignore "none" moves for this aggregation
+    # end of copied section
+    # NB: this can be slow to execute
+    group_by(player_id) %>%
+    mutate(player.cournot.transition = case_when(opponent.prev.move == player_move ~ "0",
+                                                 ((opponent.prev.move == "rock" & player_move == "paper") |
+                                                    (opponent.prev.move == "paper" & player_move == "scissors") |
+                                                    (opponent.prev.move == "scissors" & player_move == "rock")) ~ "+",
+                                                 ((opponent.prev.move == "rock" & player_move == "scissors") |
+                                                    (opponent.prev.move == "paper" & player_move == "rock") |
+                                                    (opponent.prev.move == "scissors" & player_move == "paper")) ~ "-"),
+           player.outcome.cournot.transition = paste(prev.outcome, player.cournot.transition, sep = sep)) %>%
+    count(player.outcome.cournot.transition) %>%
+    group_by(player_id, player.outcome.cournot.transition) %>%
+    mutate(prev.outcome = strsplit(player.outcome.cournot.transition, sep)[[1]][1], # add prev.outcome back in because we lose it in the count() call above
+           player.cournot.transition = strsplit(player.outcome.cournot.transition, sep)[[1]][2]) %>% # add player.cournot.transition back in because we lose it in the count() call above
+    group_by(player_id, prev.outcome) %>%
+    mutate(row.totals = sum(n),
+           # probability of this player transition, conditioned on previous outcome
+           p.cournot.transition.outcome = n / row.totals)
+}
+
+
+# Function to get conditional distribution of each player's transition (+/-/0),
+# given the combination of their previous transition and their previous outcome
+get_player_transition_prev_transition_prev_outcome_cond_probs = function(data) {
+  player_set = unique(data$player_id)
+  player.transition.prev.transition.prev.outcome.df = data.frame(player_id = character(), player.transition = character(), player.prev.transition = character(), prev.outcome = character(),
+                                                                 n = numeric(), row.totals = numeric(),
+                                                                 stringsAsFactors = F)
+  # TODO can we do this without a nested loop....
+  # Bayesian smoothing, put count of 1 in each combination before adding true counts
+  for (player.trans in TRANSITION_SET) {
+    for (prev.trans in TRANSITION_SET) {
+      for (prev.outcome in OUTCOME_SET) {
+        player.transition.prev.transition.prev.outcome.df = rbind(player.transition.prev.transition.prev.outcome.df,
+                                                                  data.frame(player_id = player_set,
+                                                                             player.transition = player.trans,
+                                                                             player.prev.transition = prev.trans,
+                                                                             prev.outcome = prev.outcome,
+                                                                             n = 1, row.totals = length(TRANSITION_SET),
+                                                                             stringsAsFactors = F))
+
+      }
+    }
+  }
+  sep = "_"
+  tmp = data %>%
+    group_by(player_id) %>%
+    mutate(prev.outcome = lag(player_outcome, 1),
+           prev.move = lag(player_move, 1),
+           prev.move2 = lag(player_move, 2)) %>%
+    filter(!is.na(prev.outcome), # lag call above sets NA for lag on first outcome: ignore it here
+           !is.na(prev.move), !is.na(prev.move2), # lag call above sets NA for lag on first two moves: ignore it here
+           prev.move2 != "none", prev.move != "none", player_move != "none") %>%
+    # TODO move to a model where we add all these cols once at the beginning then just summarize in each analysis
+    mutate(player.transition = case_when(prev.move == player_move ~ "0",
+                                         ((prev.move == "rock" & player_move == "paper") |
+                                            (prev.move == "paper" & player_move == "scissors") |
+                                            (prev.move == "scissors" & player_move == "rock")) ~ "+",
+                                         ((prev.move == "rock" & player_move == "scissors") |
+                                            (prev.move == "paper" & player_move == "rock") |
+                                            (prev.move == "scissors" & player_move == "paper")) ~ "-"),
+           player.prev.transition = case_when(prev.move2 == prev.move ~ "0",
+                                              ((prev.move2 == "rock" & prev.move == "paper") |
+                                                 (prev.move2 == "paper" & prev.move == "scissors") |
+                                                 (prev.move2 == "scissors" & prev.move == "rock")) ~ "+",
+                                              ((prev.move2 == "rock" & prev.move == "scissors") |
+                                                 (prev.move2 == "paper" & prev.move == "rock") |
+                                                 (prev.move2 == "scissors" & prev.move == "paper")) ~ "-"),
+           player.transition.prev.transition.prev.outcome = paste(player.transition, player.prev.transition, prev.outcome, sep = sep)) %>%
+    count(player.transition.prev.transition.prev.outcome) %>%
+    group_by(player_id, player.transition.prev.transition.prev.outcome) %>%
+    mutate(player.transition = strsplit(player.transition.prev.transition.prev.outcome, sep)[[1]][1], # add transition back in because we lose it in the count() call above
+           player.prev.transition = strsplit(player.transition.prev.transition.prev.outcome, sep)[[1]][2], # add prev. transition back in because we lose it in the count() call above
+           prev.outcome = strsplit(player.transition.prev.transition.prev.outcome, sep)[[1]][3]) %>% # add prev. outcome back in because we lose it in the count() call above
+    group_by(player_id, player.prev.transition, prev.outcome) %>%
+    mutate(row.totals = sum(n))
+
+  # return initial counts set to 1 in smoothing df plus counts calculated in tmp above
+  left_join(player.transition.prev.transition.prev.outcome.df, tmp, by = c("player_id", "player.transition", "player.prev.transition", "prev.outcome")) %>%
+    mutate(n.agg = ifelse(is.na(n.y), n.x, n.x + n.y),
+           row.totals.agg = ifelse(is.na(row.totals.y), row.totals.x, row.totals.x + row.totals.y),
+           p.transition.prev.transition.prev.outcome = n.agg / row.totals.agg) %>%
+    select(player_id, player.transition, player.prev.transition, prev.outcome,
+           n.agg, row.totals.agg, p.transition.prev.transition.prev.outcome) %>%
+    arrange(player_id, player.transition, player.prev.transition, prev.outcome)
+}
+
 
 
 
@@ -321,6 +551,110 @@ player_prev_2move_entropy = player_prev_2move_summary %>%
 
 
 
+### First order transition analysis: player's transition base rate
+# p(transition = x) -> 3 cells
+
+# get overall probability of each transition (for each player)
+player_transition_summary = get_player_transition_dist(data)
+
+# calculate entropy over the distribution of each transition (for each player)
+player_transition_entropy = player_transition_summary %>%
+  group_by(player_id) %>%
+  # get entropy for distribution of each transition
+  summarize(entropy_transition = -sum(p.transition * log2(p.transition)))
+
+
+### First order transition analysis: player's Cournot transition base rate
+player_cournot_transition_summary = get_player_transition_cournot_dist(data)
+
+# calculate entropy over the distribution of each cournot transition (for each player)
+player_cournot_transition_entropy = player_cournot_transition_summary %>%
+  group_by(player_id) %>%
+  summarize(entropy_cournot_transition = -sum(p.transition * log2(p.transition))) # get entropy for distribution of each transition
+
+
+
+### Second order transition analysis: player's transition given previous outcome
+# p(transition = x | prev. outcome = y) -> 9 cells
+
+# get probability of each transition, given previous outcome
+player_transition_prev_outcome_summary = get_player_transition_outcome_cond_probs(data)
+
+# get marginal probability of each participant's previous outcome
+player_prev_outcome_marginal = get_player_prev_outcome_dist(data)
+
+
+
+# calculate entropy based on probability above, normalizing by marginal
+# probability of each previous outcome
+player_transition_outcome_entropy = player_transition_prev_outcome_summary %>%
+  group_by(player_id, prev.outcome) %>%
+  # get entropy for distribution of each transition, for each prev. outcome
+  summarize(prev.outcome.entropy = -sum(p.transition.outcome * log2(p.transition.outcome))) %>%
+  inner_join(player_prev_outcome_marginal, by = "player_id") %>%
+  # normalize entropy of each transition given each prev. outcome by the probability of that prev. outcome
+  mutate(prev.outcome.entropy.norm = prev.outcome.entropy * p.outcome) %>%
+  group_by(player_id) %>%
+  # select only relevant rows from normalization process above
+  filter(prev.outcome.x == prev.outcome.y) %>%
+  # sum normalized entropy for distribution of each transition given each prev. outcome
+  summarize(entropy_outcome_transition = sum(prev.outcome.entropy.norm))
+
+
+### Second order transition analysis: player's Cournot transition given previous outcome
+# p(cournot transition = x | prev. outcome = y) -> 9 cells
+
+# get probability of each *Cournot* transition, given previous outcome
+player_cournot_transition_prev_outcome_summary = get_player_cournot_transition_outcome_cond_probs(data)
+
+# NB: the next step relies on player's previous outcome marginals,
+# which we have already obtained above
+
+
+# calculate entropy based on probability above, normalizing by marginal probability of each previous outcome
+player_cournot_transition_outcome_entropy = player_cournot_transition_prev_outcome_summary %>%
+  group_by(player_id, prev.outcome) %>%
+  # get entropy for distribution of each transition, for each prev. outcome
+  summarize(prev.outcome.entropy = -sum(p.cournot.transition.outcome * log2(p.cournot.transition.outcome))) %>%
+  inner_join(player_prev_outcome_marginal, by = "player_id") %>%
+  # normalize entropy of each transition given each prev. outcome by the probability of that prev. outcome
+  mutate(prev.outcome.entropy.norm = prev.outcome.entropy * p.outcome) %>%
+  group_by(player_id) %>%
+  # select only relevant rows from normalization process above
+  filter(prev.outcome.x == prev.outcome.y) %>%
+  # sum normalized entropy for distribution of each transition given each prev. outcome
+  summarize(entropy_outcome_cournot_transition = sum(prev.outcome.entropy.norm))
+
+
+
+
+### Third order analysis: player's transition given previous transition, previous outcome
+# p(transition = x | prev. transition = y, prev. outcome = z) -> 27 cells
+
+# get probability of each transition, given participant's previous transition and previous outcome
+player_transition_prev_transition_prev_outcome_summary = get_player_transition_prev_transition_prev_outcome_cond_probs(data)
+
+# get marginal probability of each participant's previous transition and previous outcome
+player_prev_transition_prev_outcome_marginal = get_player_prev_transition_prev_outcome_dist(data)
+
+
+# calculate entropy based on probability above, normalizing by marginal probability of each player's previous transition, outcome combination
+sep = "_"
+player_transition_prev_transition_prev_outcome_entropy = player_transition_prev_transition_prev_outcome_summary %>%
+  group_by(player_id, player.prev.transition, prev.outcome) %>%
+  # get entropy for distribution of each transition, for each prev. transition, outcome combination
+  summarize(player.prev.transition.prev.outcome.entropy = -sum(p.transition.prev.transition.prev.outcome * log2(p.transition.prev.transition.prev.outcome))) %>%
+  # add column for coalescing previous transition, previous outcome
+  mutate(player.prev.transition.prev.outcome = paste(player.prev.transition, prev.outcome, sep = sep)) %>%
+  inner_join(player_prev_transition_prev_outcome_marginal, by = "player_id") %>%
+  # normalize entropy of each transition given each prev. transition, prev. outcome by the probability of that prev. transition, prev. outcome
+  mutate(player.prev.transition.prev.outcome.entropy.norm = player.prev.transition.prev.outcome.entropy * p.transition.outcome) %>%
+  group_by(player_id) %>%
+  # select only relevant rows from normalization process above
+  filter(player.prev.transition.prev.outcome.x == player.prev.transition.prev.outcome.y) %>%
+  # sum normalized entropy for distribution of each transition given each prev. outcome
+  summarize(entropy_prev_transition_prev_outcome = sum(player.prev.transition.prev.outcome.entropy.norm))
+
 
 
 # ANALYSIS: information gain correction ====
@@ -335,10 +669,18 @@ information_gain_uncorrected = player_entropy %>%
   left_join(player_prev_move_entropy, by = "player_id") %>%
   left_join(opponent_prev_move_entropy, by = "player_id") %>%
   left_join(player_prev_2move_entropy, by = "player_id") %>%
+  # transition distributions
+  left_join(player_transition_entropy, by = "player_id") %>%
+  left_join(player_cournot_transition_entropy, by = "player_id") %>%
+  left_join(player_transition_outcome_entropy, by = "player_id") %>%
+  left_join(player_cournot_transition_outcome_entropy, by = "player_id") %>%
+  left_join(player_transition_prev_transition_prev_outcome_entropy, by = "player_id") %>%
   #
-  gather(entropy_type, entropy_val, entropy_move_dist:entropy_prev_2move) %>%
+  gather(entropy_type, entropy_val, entropy_move_dist:entropy_prev_transition_prev_outcome) %>%
   mutate(entropy_val = log2(length(MOVE_SET)) - entropy_val) %>%
   rename(information_gain = entropy_val) %>%
+  # Remove cournot transition entropy since we don't graph it
+  filter(entropy_type != "entropy_outcome_cournot_transition") %>%
   mutate(corrected = "Uncorrected")
 
 
@@ -347,23 +689,28 @@ information_gain_corrected = player_entropy %>%
   left_join(player_prev_move_entropy, by = "player_id") %>%
   left_join(opponent_prev_move_entropy, by = "player_id") %>%
   left_join(player_prev_2move_entropy, by = "player_id") %>%
+  # transition distributions
+  left_join(player_transition_entropy, by = "player_id") %>%
+  left_join(player_cournot_transition_entropy, by = "player_id") %>%
+  left_join(player_transition_outcome_entropy, by = "player_id") %>%
+  left_join(player_cournot_transition_outcome_entropy, by = "player_id") %>%
+  left_join(player_transition_prev_transition_prev_outcome_entropy, by = "player_id") %>%
   #
-  gather(entropy_type, entropy_val, entropy_move_dist:entropy_prev_2move) %>%
+  gather(entropy_type, entropy_val, entropy_move_dist:entropy_prev_transition_prev_outcome) %>%
   mutate(entropy_val = log2(length(MOVE_SET)) - entropy_val) %>%
   rename(information_gain = entropy_val) %>%
   spread(entropy_type, information_gain) %>%
   mutate(
-         # TODO fix this one to subtract cournot transition
-         entropy_opponent_prev_move = entropy_opponent_prev_move - entropy_move_dist, # opponent prev move = "" - cournot transition - move dist
-         # TODO fix this one to subtract transition
-         entropy_prev_move = entropy_prev_move - entropy_move_dist, # player prev move = "" - transition - move dist
-         # transition.entropy.1.player.outcome = transition.entropy.1.player.outcome - transition.entropy.0 - transition.entropy.0.5, # transition|outcome = "" - transition - cournot transition
-         # transition.entropy.1.5.player.outcome = transition.entropy.1.5.player.outcome - transition.entropy.0 - transition.entropy.0.5, # cournot transition|outcome = "" - transition - cournot transition
-         # TODO fix this one to also subtract transition
-         entropy_prev_2move = entropy_prev_2move - entropy_prev_move - entropy_move_dist # player prev 2 moves = "" - corrected player prev move - uncorrected move dist - uncorrected transition dist
-         # transition.entropy.2.player.prev.transition.prev.outcome = transition.entropy.2.player.prev.transition.prev.outcome - transition.entropy.1.player.outcome - transition.entropy.1.5.player.outcome - transition.entropy.0 - transition.entropy.0.5 # trans | prior trans, prior outcome = "" - corrected transition|outcome - corrected cournot transition|outcome - uncorrected transition - uncorrected cournot
+         entropy_opponent_prev_move = entropy_opponent_prev_move - entropy_cournot_transition - entropy_move_dist, # opponent prev move = "" - cournot transition - move dist
+         entropy_prev_move = entropy_prev_move - entropy_transition - entropy_move_dist, # player prev move = "" - transition - move dist
+         entropy_outcome_transition = entropy_outcome_transition - entropy_transition - entropy_cournot_transition, # transition|outcome = "" - transition - cournot transition
+         entropy_outcome_cournot_transition = entropy_outcome_cournot_transition - entropy_transition - entropy_cournot_transition, # cournot transition|outcome = "" - transition - cournot transition
+         entropy_prev_2move = entropy_prev_2move - entropy_prev_move - entropy_transition - entropy_move_dist, # player prev 2 moves = "" - corrected player prev move - uncorrected transition dist - uncorrected move dist
+         entropy_prev_transition_prev_outcome = entropy_prev_transition_prev_outcome - entropy_outcome_transition - entropy_outcome_cournot_transition - entropy_transition - entropy_cournot_transition # trans | prior trans, prior outcome = "" - corrected transition|outcome - corrected cournot transition|outcome - uncorrected transition - uncorrected cournot
          ) %>%
-  gather(entropy_type, information_gain, entropy_move_dist:entropy_prev_move) %>%
+  gather(entropy_type, information_gain, entropy_cournot_transition:entropy_transition) %>%
+  # Remove cournot transition entropy since we don't graph it
+  filter(entropy_type != "entropy_outcome_cournot_transition") %>%
   mutate(corrected = "Corrected")
 
 
@@ -382,13 +729,13 @@ information_gain_summary = information_gain_combined %>%
 
 legend_width = 10
 graph_labels_final = c("entropy_move_dist" = str_wrap("Choice base rate (R/P/S)", legend_width),
-                       # "transition.entropy.0" = str_wrap("Transition base rate (+/\U2212/0)", legend_width),
-                       # "transition.entropy.0.5" = str_wrap("Opponent transition base rate (+/\U2212/0)", legend_width),
+                       "entropy_transition" = str_wrap("Transition base rate (+/\U2212/0)", legend_width),
+                       "entropy_cournot_transition" = str_wrap("Opponent transition base rate (+/\U2212/0)", legend_width),
                        "entropy_prev_move" = str_wrap("Choice given player's prior choice", legend_width),
                        "entropy_opponent_prev_move" = str_wrap("Choice given opponent's prior choice", legend_width),
-                       # "transition.entropy.1.player.outcome" = str_wrap("Transition given prior outcome (W/L/T)", legend_width),
-                       "entropy_prev_2move" = str_wrap("Choice given player's prior two choices", legend_width)
-                       # "transition.entropy.2.player.prev.transition.prev.outcome" = str_wrap("Transition given prior transition & prior outcome", legend_width)
+                       "entropy_outcome_transition" = str_wrap("Transition given prior outcome (W/L/T)", legend_width),
+                       "entropy_prev_2move" = str_wrap("Choice given player's prior two choices", legend_width),
+                       "entropy_prev_transition_prev_outcome" = str_wrap("Transition given prior transition & prior outcome", legend_width)
 )
 
 information_gain_summary = information_gain_summary %>%
@@ -397,13 +744,13 @@ information_gain_summary = information_gain_summary %>%
 information_gain_summary$entropy_type = factor(information_gain_summary$entropy_type,
                                                levels =
                                                  c(str_wrap("Choice base rate (R/P/S)", legend_width),
-                                                   # str_wrap("Transition base rate (+/\U2212/0)", legend_width),
-                                                   # str_wrap("Opponent transition base rate (+/\U2212/0)", legend_width),
+                                                   str_wrap("Transition base rate (+/\U2212/0)", legend_width),
+                                                   str_wrap("Opponent transition base rate (+/\U2212/0)", legend_width),
                                                    str_wrap("Choice given player's prior choice", legend_width),
                                                    str_wrap("Choice given opponent's prior choice", legend_width),
-                                                   # str_wrap("Transition given prior outcome (W/L/T)", legend_width),
-                                                   str_wrap("Choice given player's prior two choices", legend_width)
-                                                   # str_wrap("Transition given prior transition & prior outcome", legend_width)
+                                                   str_wrap("Transition given prior outcome (W/L/T)", legend_width),
+                                                   str_wrap("Choice given player's prior two choices", legend_width),
+                                                   str_wrap("Transition given prior transition & prior outcome", legend_width)
                                                    )
                                                )
 
@@ -420,9 +767,8 @@ ggplot(data = information_gain_summary,
         axis.title.x = element_blank(),
         axis.text.x = element_text(size = 12, face = "bold", angle = 0),
         axis.text.y = element_text(size = 12, face = "bold")
-  )
-
-ggsave(filename = "information_gain_corr.png",
+  ) +
+  ggsave(filename = "information_gain_corr.png",
        path = "img",
        width = 10, height = 6.5)
 
