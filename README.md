@@ -1,1 +1,1 @@
-# rps-games-submission
+# rps-games-analysis

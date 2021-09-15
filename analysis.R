@@ -14,8 +14,8 @@ library(patchwork)
 
 # GLOBALS ====
 
+FILE_PATH = "data"
 DATA_FILE = "rps_v1_data.csv"
-DATA_PATH = "/Users/erikbrockbank/web/vullab/rps/analysis"
 
 MOVE_SET = c("rock", "paper", "scissors")
 
@@ -225,8 +225,8 @@ individ_plot_theme = theme(
 
 
 # INITIALIZATION: read data ====
-data = read_data(DATA_FILE, DATA_PATH)
-# unique(data$game_id)
+data = read_data(DATA_FILE, FILE_PATH)
+# unique(data$game_id) # sanity check
 
 
 
@@ -381,14 +381,14 @@ information_gain_summary = information_gain_combined %>%
 # ANALYSIS: information gain plots ====
 
 legend_width = 10
-graph_labels_final = c("entropy_move_dist" = str_wrap("Choice base rate (R/P/S)", legend.width),
-                       # "transition.entropy.0" = str_wrap("Transition base rate (+/-/0)", legend.width),
-                       # "transition.entropy.0.5" = str_wrap("Opponent transition base rate (+/-/0)", legend.width),
-                       "entropy_prev_move" = str_wrap("Choice given player's prior choice", legend.width),
-                       "entropy_opponent_prev_move" = str_wrap("Choice given opponent's prior choice", legend.width),
-                       # "transition.entropy.1.player.outcome" = str_wrap("Transition given prior outcome (W/L/T)", legend.width),
-                       "entropy_prev_2move" = str_wrap("Choice given player's prior two choices", legend.width)
-                       # "transition.entropy.2.player.prev.transition.prev.outcome" = str_wrap("Transition given prior transition & prior outcome", legend.width)
+graph_labels_final = c("entropy_move_dist" = str_wrap("Choice base rate (R/P/S)", legend_width),
+                       # "transition.entropy.0" = str_wrap("Transition base rate (+/\U2212/0)", legend_width),
+                       # "transition.entropy.0.5" = str_wrap("Opponent transition base rate (+/\U2212/0)", legend_width),
+                       "entropy_prev_move" = str_wrap("Choice given player's prior choice", legend_width),
+                       "entropy_opponent_prev_move" = str_wrap("Choice given opponent's prior choice", legend_width),
+                       # "transition.entropy.1.player.outcome" = str_wrap("Transition given prior outcome (W/L/T)", legend_width),
+                       "entropy_prev_2move" = str_wrap("Choice given player's prior two choices", legend_width)
+                       # "transition.entropy.2.player.prev.transition.prev.outcome" = str_wrap("Transition given prior transition & prior outcome", legend_width)
 )
 
 information_gain_summary = information_gain_summary %>%
@@ -396,14 +396,14 @@ information_gain_summary = information_gain_summary %>%
 
 information_gain_summary$entropy_type = factor(information_gain_summary$entropy_type,
                                                levels =
-                                                 c(str_wrap("Choice base rate (R/P/S)", legend.width),
-                                                   # str_wrap("Transition base rate (+/-/0)", legend.width),
-                                                   # str_wrap("Opponent transition base rate (+/-/0)", legend.width),
-                                                   str_wrap("Choice given player's prior choice", legend.width),
-                                                   str_wrap("Choice given opponent's prior choice", legend.width),
-                                                   # str_wrap("Transition given prior outcome (W/L/T)", legend.width),
-                                                   str_wrap("Choice given player's prior two choices", legend.width)
-                                                   # str_wrap("Transition given prior transition & prior outcome", legend.width)
+                                                 c(str_wrap("Choice base rate (R/P/S)", legend_width),
+                                                   # str_wrap("Transition base rate (+/\U2212/0)", legend_width),
+                                                   # str_wrap("Opponent transition base rate (+/\U2212/0)", legend_width),
+                                                   str_wrap("Choice given player's prior choice", legend_width),
+                                                   str_wrap("Choice given opponent's prior choice", legend_width),
+                                                   # str_wrap("Transition given prior outcome (W/L/T)", legend_width),
+                                                   str_wrap("Choice given player's prior two choices", legend_width)
+                                                   # str_wrap("Transition given prior transition & prior outcome", legend_width)
                                                    )
                                                )
 
@@ -422,5 +422,8 @@ ggplot(data = information_gain_summary,
         axis.text.y = element_text(size = 12, face = "bold")
   )
 
+ggsave(filename = "information_gain_corr.png",
+       path = "img",
+       width = 10, height = 6.5)
 
 
